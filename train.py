@@ -57,12 +57,20 @@ if __name__ == "__main__":
         train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.9, 0.1])
 
     # Loaders
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, drop_last=True, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False, drop_last=False, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, drop_last=True, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, drop_last=False, pin_memory=True)
 
-    model = models.alexnet(weights=models.AlexNet_Weights.IMAGENET1K_V1)
-    in_features = model.classifier[6].weight.shape[1]
-    model.classifier[6] = nn.Linear(in_features, SportDataset.NUM_CLASSES)
+    # model = models.alexnet(weights=models.AlexNet_Weights.IMAGENET1K_V1)
+    # in_features = model.classifier[6].weight.shape[1]
+    # model.classifier[6] = nn.Linear(in_features, SportDataset.NUM_CLASSES)
+    
+    # model = models.vit_h_14(weights=models.ViT_H_14_Weights.IMAGENET1K_SWAG_LINEAR_V1)
+    # in_features = model.heads.head.in_features
+    # model.heads.head = nn.Linear(in_features, SportDataset.NUM_CLASSES)
+    
+    model = models.efficientnet_b2(weights=models.EfficientNet_B2_Weights.IMAGENET1K_V1)
+    in_features = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(in_features, SportDataset.NUM_CLASSES)
 
     model.cuda();
 
