@@ -254,8 +254,6 @@ if __name__ == "__main__":
         train_correct = torch.tensor(0, device='cuda')
         import time
         for it, (imgs, labels) in enumerate(train_loader):
-            t = time.time()
-            print("it")
             imgs, labels = imgs.cuda(), labels.cuda()
             logits = model(imgs)
             loss = F.cross_entropy(logits, labels)
@@ -269,8 +267,6 @@ if __name__ == "__main__":
             with torch.no_grad():
                 train_loss += loss * len(imgs)
                 train_correct += torch.sum(torch.argmax(logits, axis=1) == labels)
-
-            print(time.time() -t)
 
         # Log train metrics
         train_loss = train_loss.item() / train_count
