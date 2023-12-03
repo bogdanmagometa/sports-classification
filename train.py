@@ -227,13 +227,13 @@ if __name__ == "__main__":
     config = wandb.run.config
     wandb.run.log_code('.')
 
-    # val_loss, val_acc = val_step(model, val_loader)
-    # print(f"Preliminary val:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
-    # wandb.log({
-    #     'val_loss': val_loss,
-    #     'val_acc': val_acc,
-    #     'epoch': 0
-    # })
+    val_loss, val_acc = val_step(model, val_loader)
+    print(f"Preliminary val:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
+    wandb.log({
+        'val_loss': val_loss,
+        'val_acc': val_acc,
+        'epoch': 0
+    })
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, threshold=0.01)
 
