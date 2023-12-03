@@ -40,9 +40,12 @@ def val_step(model, loader):
 
     return val_loss.item() / val_count, val_correct.item() / val_count
 
-def get_dataset():
+def get_dataset(transform_config):
+    rrc = transform_config['random_resize_crop']
     transforms = v2.Compose([
         T.ToTensor(),
+        T.RandomHorizontalFlip(),
+        T.RandomResizedCrop(rrc['size'], scale=rrc['scale'], ratio=rrc['ratio']),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     dataset = SportDataset('./hw-ucu-12023-4-100-sports-image-classification', transform=transforms, train=True)
@@ -74,6 +77,7 @@ def get_model(model_config: dict):
         seq_blocks.append(model.heads)
     else:
         raise ValueError(f"Invalid model config name: {model_config['name']}")
+    model.train()
 
     # General code
     strat = model_config['transfer_strategy']
@@ -91,7 +95,7 @@ def get_model(model_config: dict):
                     param.requires_grad = False
     elif strat['type'] == 'unfreeze_last_percent':
         num_unfreeze = round(strat['percentage'] * len(seq_blocks))
-        for blk in seq_blocks[max(len(seq_blocks) - num_unfreeze, 0):]:
+        for blk in seq_blocks[:max(len(seq_blocks) - num_unfreeze, 0)]:
             for param in blk.parameters():
                 param.requires_grad = False
     else:
@@ -118,12 +122,12 @@ def random_transfer_strategy():
     strategy = {}
     
     strategies_types = ['finetune', 'extractor', 'random', 'unfreeze_last_percent']
-    strategy_type = np.random.choice(strategies_types)
-    strategy['type'] = strategy_type
-    if strategy_type == 'unfreeze_last_percent':
+    # strategy['type'] = 'unfreeze_last_percent'
+    strategy['type'] = np.random.choice(strategies_types)
+    if strategy['type'] == 'unfreeze_last_percent':
         percentage = np.random.rand()
         strategy['percentage'] = percentage
-    elif strategy_type == 'random':
+    elif strategy['type'] == 'random':
         strategy['freeze_prob'] = np.random.rand()
         strategy['seed'] = np.random.randint(0, 10000)
 
@@ -136,8 +140,8 @@ def random_optimizer():
         'kwargs': {}
     }
     # if optimizer['name'] == 'SGD':
-    optimizer['kwargs']['lr'] = np.random.choice([0.1, 0.01, 0.001, 0.0001])
-    optimizer['kwargs']['weight_decay'] = np.random.choice([0, 1e-5])
+    optimizer['kwargs']['lr'] = np.random.choice([0.1, 0.01, 0.001, 0.0001, 1e-5])
+    optimizer['kwargs']['weight_decay'] = np.random.choice([1e-2, 1e-3, 1e-4])
     return optimizer
 
 def generate_random_config(model_name: Optional[str] = None):
@@ -148,6 +152,7 @@ def generate_random_config(model_name: Optional[str] = None):
     # strategy
     config = {
         'batch_size': np.random.choice([128, 256, 512]),
+        # 'batch_size': np.random.choice([1024, 2048, 4096]),
         'val_batch_size': 128,
         'randomness': {
             'seed': 0,
@@ -163,27 +168,56 @@ def generate_random_config(model_name: Optional[str] = None):
     return config
 
 if __name__ == "__main__":
+    # config = {
+    #     'batch_size': 256, # Use only divisible by 16
+    #     'val_batch_size': 128,
+    #     'randomness': {
+    #         'seed': 0,
+    #         'model_seed': 42,
+    #         'split_seed': 42
+    #     },
+    #     'optimizer': {
+    #         'name': 'Adam',
+    #         'kwargs': {}
+    #     },
+    #     'model': {
+    #         'name': 'vit_h_14',
+    #         'transfer_strategy': {
+    #             'type': 'unfreeze_last_percent',
+    #             'percentage': .1
+    #         }
+    #     }
+    # }
     config = {
-        'batch_size': 256, # Use only divisible by 16
-        'val_batch_size': 128,
-        'randomness': {
-            'seed': 0,
-            'model_seed': 42,
-            'split_seed': 42
-        },
-        'optimizer': {
-            'name': 'Adam',
-            'kwargs': {}
-        },
-        'model': {
-            'name': 'vit_h_14',
-            'transfer_strategy': {
-                'type': 'unfreeze_last_percent',
-                'percentage': .1
+        "model": {
+            "name": "efficientnet_b2",
+            "transfer_strategy": {
+                "type": "finetune"
             }
-        }
+        },
+        "optimizer": {
+            "name": "Adam",
+            "kwargs": {
+                "lr": 0.001,
+                "weight_decay": 0.0001
+            }
+        },
+        "batch_size": 512,
+        "randomness": {
+            "seed": 0,
+            "model_seed": 42,
+            "split_seed": 42
+        },
+        "transform": {
+            'random_resize_crop': {
+                'size': (224, 224),
+                'scale': (0.7, 1.0),
+                'ratio': (0.8, 1.2)
+            }
+        },
+        "val_batch_size": 128
     }
-    config = generate_random_config('efficientnet_b2')
+    # config = generate_random_config('efficientnet_b2')
     pprint(config)
     
     # Ensure deterministic behavior
@@ -196,7 +230,7 @@ if __name__ == "__main__":
     
     
     # Train dataset
-    dataset = get_dataset()
+    dataset = get_dataset(config['transform'])
 
     # Split into train and val parts
     with temp_seed(config['randomness']['split_seed']):
@@ -222,10 +256,11 @@ if __name__ == "__main__":
 
     wandb.init(
         entity="bohdanmahometa",
-        project="sports-classification-2",
+        project="sports-classification-3",
         resume='never',
         config=config,
-        job_type='effnetb2'
+        name='noble-lake-rrc2',
+        # job_type='effnetb2_horflip'
     )
     config = wandb.run.config
     wandb.run.log_code('.')
@@ -296,6 +331,6 @@ if __name__ == "__main__":
             best_val_acc = val_acc
             output_dir = os.path.join('experiments', wandb.run.name)
             os.makedirs(output_dir, exist_ok=True)
-            torch.save(model.state_dict(), os.path.join(output_dir, f'epoch{epoch}_acc{val_acc:.3f}.ckpt'))
+            torch.save(model.state_dict(), os.path.join(output_dir, f'ckpt.ckpt'))
 
     wandb.finish()
