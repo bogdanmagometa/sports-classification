@@ -146,8 +146,8 @@ def generate_random_config(model_name: Optional[str] = None):
         model_name = np.random.choice(model_names)
     # strategy
     config = {
-        'batch_size': 32,
-        'val_batch_size': 256,
+        'batch_size': 256,
+        'val_batch_size': 128,
         'randomness': {
             'seed': 0,
             'model_seed': 42,
@@ -163,25 +163,25 @@ def generate_random_config(model_name: Optional[str] = None):
 
 if __name__ == "__main__":
     config = {
-        'batch_size': 64,
-        'val_batch_size': 256,
+        'batch_size': 16, # Use only divisible by 16
+        'val_batch_size': 128,
         'randomness': {
             'seed': 0,
             'model_seed': 42,
             'split_seed': 42
         },
         'optimizer': {
-            'name': 'adam',
+            'name': 'Adam',
             'kwargs': {}
         },
         'model': {
-            'name': 'efficientnet',
+            'name': 'vit_h_14',
             'transfer_strategy': {
                 'type': 'finetune'
             }
         }
     }
-    config = generate_random_config()
+    # config = generate_random_config()
     pprint(config)
     
     # Ensure deterministic behavior
@@ -201,7 +201,14 @@ if __name__ == "__main__":
         train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.9, 0.1])
 
     # Loaders
-    train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], num_workers=10, shuffle=True, drop_last=True, pin_memory=True)
+    if config['model']['name'] == 'alexnet':
+        batch_size = config['batch_size']
+    elif config['model']['name'] == 'efficientnet_b2':
+        batch_size = 16
+    elif config['model']['name'] == 'vit_h_14':
+        batch_size = 4
+    acc_grad_batches = config['batch_size'] // batch_size
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=10, shuffle=True, drop_last=True, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=config['val_batch_size'], num_workers=10, shuffle=False, drop_last=False, pin_memory=True)
 
     # Model
@@ -220,13 +227,13 @@ if __name__ == "__main__":
     config = wandb.run.config
     wandb.run.log_code('.')
 
-    val_loss, val_acc = val_step(model, val_loader)
-    print(f"Preliminary val:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
-    wandb.log({
-        'val_loss': val_loss,
-        'val_acc': val_acc,
-        'epoch': 0
-    })
+    # val_loss, val_acc = val_step(model, val_loader)
+    # print(f"Preliminary val:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
+    # wandb.log({
+    #     'val_loss': val_loss,
+    #     'val_acc': val_acc,
+    #     'epoch': 0
+    # })
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, threshold=0.01)
 
@@ -245,18 +252,25 @@ if __name__ == "__main__":
         train_loss = torch.tensor(0.0, dtype=torch.float32, device='cuda')
         train_count = 0
         train_correct = torch.tensor(0, device='cuda')
+        import time
         for it, (imgs, labels) in enumerate(train_loader):
+            t = time.time()
+            print("it")
             imgs, labels = imgs.cuda(), labels.cuda()
             logits = model(imgs)
             loss = F.cross_entropy(logits, labels)
-            optimizer.zero_grad()
+            if it % acc_grad_batches == 0:
+                optimizer.zero_grad()
             loss.backward()
-            optimizer.step()
+            if (it + 1) % acc_grad_batches == 0:
+                optimizer.step()
 
             train_count += len(imgs)
             with torch.no_grad():
                 train_loss += loss * len(imgs)
                 train_correct += torch.sum(torch.argmax(logits, axis=1) == labels)
+
+            print(time.time() -t)
 
         # Log train metrics
         train_loss = train_loss.item() / train_count
