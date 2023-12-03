@@ -1,6 +1,8 @@
 from typing import Callable, Optional, Tuple, Any, List, Dict
 import os
 from contextlib import contextmanager
+import random
+from pprint import pprint
 
 import matplotlib.pyplot as plt
 import torch
@@ -47,43 +49,167 @@ def get_dataset():
     assert len(dataset) == 13695
     return dataset
 
+def get_model(model_config: dict):
+    # Model specific code
+    if model_config['name'] == 'alexnet':
+        model = models.alexnet(weights=models.AlexNet_Weights.IMAGENET1K_V1)
+        in_features = model.classifier[6].in_features
+        classifier = nn.Linear(in_features, SportDataset.NUM_CLASSES)
+        model.classifier[6] = classifier
+        seq_blocks = [mod for mod in model.features if list(mod.parameters())]
+        seq_blocks.extend([mod for mod in model.classifier if list(mod.parameters())])
+    elif model_config['name'] == 'efficientnet_b2':
+        model = models.efficientnet_b2(weights=models.EfficientNet_B2_Weights.IMAGENET1K_V1)
+        in_features = model.classifier[1].in_features
+        classifier = nn.Linear(in_features, SportDataset.NUM_CLASSES)
+        model.classifier[1] = classifier
+        seq_blocks = list(model.features)
+        seq_blocks.append(model.classifier)        
+    elif model_config['name'] == 'vit_h_14':
+        model = models.vit_h_14(weights=models.ViT_H_14_Weights.IMAGENET1K_SWAG_LINEAR_V1)
+        in_features = model.heads.head.in_features
+        classifier = nn.Linear(in_features, SportDataset.NUM_CLASSES)
+        model.heads.head = classifier
+        seq_blocks = list(model.encoder.layers)
+        seq_blocks.append(model.heads)
+    else:
+        raise ValueError(f"Invalid model config name: {model_config['name']}")
+
+    # General code
+    strat = model_config['transfer_strategy']
+    if strat['type'] == 'finetune':
+        pass
+    elif strat['type'] == 'extractor':
+        for param in model.parameters():
+            if param is not classifier.weight and param is not classifier.bias:
+                param.requires_grad = False
+    elif strat['type'] == 'random':
+        freeze_prob = strat['freeze_prob']
+        with temp_seed(strat['seed']):
+            for param in model.parameters():
+                if np.random.rand() < freeze_prob:
+                    param.requires_grad = False
+    elif strat['type'] == 'freeze_last_percent':
+        num_freeze = round(strat['percentage'] * len(seq_blocks))
+        for blk in seq_blocks[max(len(seq_blocks) - num_freeze, 0):]:
+            for param in blk.parameters():
+                param.requires_grad = False
+    else:
+        raise ValueError(f"Invalid transfer strategy type: {strat['type']}")
+
+    return model
+
+def get_optimizer(optimizer_config: dict):
+    kwargs = optimizer_config['kwargs']
+    if optimizer_config['name'] == 'Adam':
+        optimizer = torch.optim.Adam(model.parameters(), **kwargs)
+    elif optimizer_config['name'] == 'SGD':
+        optimizer = torch.optim.SGD(model.parameters(), **kwargs)
+    elif optimizer_config['name'] == 'AdamW':
+        optimizer = torch.optim.AdamW(model.parameters(), **kwargs)
+    else:
+        raise ValueError(f"Invalid optimizer config name: {optimizer_config['name']}")
+
+    return optimizer
+
 NUM_EPOCHS = 100
+
+def random_transfer_strategy():
+    strategy = {}
+    
+    strategies_types = ['finetune', 'extractor', 'random', 'freeze_last_percent']
+    strategy_type = np.random.choice(strategies_types)
+    strategy['type'] = strategy_type
+    if strategy_type == 'freeze_last_percent':
+        percentage = np.random.rand()
+        strategy['percentage'] = percentage
+    elif strategy_type == 'random':
+        strategy['freeze_prob'] = np.random.rand()
+        strategy['seed'] = np.random.randint(0, 10000)
+
+    return strategy
+
+def random_optimizer():
+    optimizer_names = ['Adam', 'SGD', 'AdamW']
+    optimizer = {
+        'name': np.random.choice(optimizer_names),
+        'kwargs': {}
+    }
+    if optimizer['name'] == 'SGD':
+        optimizer['kwargs']['lr'] = np.random.choice([0.01, 0.001, 0.0001])
+    return optimizer
+
+def generate_random_config(model_name: Optional[str] = None):
+    # model
+    model_names = ['alexnet', 'efficientnet_b2', 'vit_h_14']
+    if model_name is None:
+        model_name = np.random.choice(model_names)
+    # strategy
+    config = {
+        'batch_size': 32,
+        'val_batch_size': 256,
+        'randomness': {
+            'seed': 0,
+            'model_seed': 42,
+            'split_seed': 42
+        },
+        'optimizer': random_optimizer(),
+        'model': {
+            'name': model_name,
+            'transfer_strategy': random_transfer_strategy()
+        }
+    }
+    return config
 
 if __name__ == "__main__":
     config = {
         'batch_size': 64,
         'val_batch_size': 256,
-        'model': 'efficientnet',
+        'randomness': {
+            'seed': 0,
+            'model_seed': 42,
+            'split_seed': 42
+        },
+        'optimizer': {
+            'name': 'adam',
+            'kwargs': {}
+        },
+        'model': {
+            'name': 'efficientnet',
+            'transfer_strategy': {
+                'type': 'finetune'
+            }
+        }
     }
+    config = generate_random_config()
+    pprint(config)
+    
+    # Ensure deterministic behavior
+    seed = config['randomness']['seed']
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
     
     
     # Train dataset
     dataset = get_dataset()
 
     # Split into train and val parts
-    with temp_seed(42):
+    with temp_seed(config['randomness']['split_seed']):
         train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.9, 0.1])
 
     # Loaders
     train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], num_workers=10, shuffle=True, drop_last=True, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=config['val_batch_size'], num_workers=10, shuffle=False, drop_last=False, pin_memory=True)
 
-    # model = models.alexnet(weights=models.AlexNet_Weights.IMAGENET1K_V1)
-    # in_features = model.classifier[6].in_features
-    # model.classifier[6] = nn.Linear(in_features, SportDataset.NUM_CLASSES)
-    
-    # model = models.vit_h_14(weights=models.ViT_H_14_Weights.IMAGENET1K_SWAG_LINEAR_V1)
-    # in_features = model.heads.head.in_features
-    # model.heads.head = nn.Linear(in_features, SportDataset.NUM_CLASSES)
-    
-    model = models.efficientnet_b2(weights=models.EfficientNet_B2_Weights.IMAGENET1K_V1)
-    in_features = model.classifier[1].in_features
-    model.classifier[1] = nn.Linear(in_features, SportDataset.NUM_CLASSES)
-
+    # Model
+    with temp_seed(config['randomness']['model_seed']):
+        model = get_model(config['model'])
     model.cuda();
 
-    NUM_EPOCHS = 100
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = get_optimizer(config['optimizer'])
 
     wandb.init(
         entity="bohdanmahometa",
@@ -106,7 +232,6 @@ if __name__ == "__main__":
 
     for epoch in range(1, NUM_EPOCHS + 1):
         lr = optimizer.param_groups[0]['lr']
-        print(f"lr = {lr}")
         if lr < 1e-6:
             break
 
