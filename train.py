@@ -132,7 +132,7 @@ def random_transfer_strategy():
     strategy['type'] = 'unfreeze_last_percent'
     # strategy['type'] = np.random.choice(strategies_types)
     if strategy['type'] == 'unfreeze_last_percent':
-        percentage = np.random.rand() * 0.1
+        percentage = np.random.rand()
         strategy['percentage'] = percentage
     elif strategy['type'] == 'random':
         strategy['freeze_prob'] = np.random.rand()
@@ -159,7 +159,7 @@ def generate_random_config(model_name: Optional[str] = None):
     # strategy
     config = {
         # 'batch_size': np.random.choice([128, 256, 512]),
-        'batch_size': np.random.choice([256, 512, 1024]),
+        'batch_size': np.random.choice([512, 1024, 2048]),
         # 'batch_size': np.random.choice([1024, 2048, 4096]),
         'val_batch_size': 128,
         'randomness': {
@@ -267,7 +267,7 @@ if __name__ == "__main__":
     # Model
     with temp_seed(config['randomness']['model_seed']):
         model = get_model(config['model'])
-    model.load_state_dict(torch.load('/titan/bohdan/sports-classification/experiments/gentle-grass-16/ckpt.ckpt', map_location='cpu'))
+    # model.load_state_dict(torch.load('/titan/bohdan/sports-classification/experiments/gentle-grass-16/ckpt.ckpt', map_location='cpu'))
     model.cuda();
 
     optimizer = get_optimizer(config['optimizer'])
@@ -283,13 +283,13 @@ if __name__ == "__main__":
     config = wandb.run.config
     wandb.run.log_code('.')
 
-    # val_loss, val_acc = val_step(model, val_loader)
-    # print(f"Preliminary val:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
-    # wandb.log({
-    #     'val_loss': val_loss,
-    #     'val_acc': val_acc,
-    #     'epoch': 0
-    # })
+    val_loss, val_acc = val_step(model, val_loader)
+    print(f"Preliminary val:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
+    wandb.log({
+        'val_loss': val_loss,
+        'val_acc': val_acc,
+        'epoch': 0
+    })
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, threshold=0.01)
 
