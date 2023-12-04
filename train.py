@@ -45,7 +45,7 @@ def get_dataset(transform_config):
     transforms = v2.Compose([
         T.ToTensor(),
         T.RandomHorizontalFlip(),
-        T.RandomResizedCrop(rrc['size'], scale=rrc['scale'], ratio=rrc['ratio']),
+        T.RandomResizedCrop(rrc['size'], scale=rrc['scale'], ratio=rrc['ratio'], antialias=True),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     dataset = SportDataset('./hw-ucu-12023-4-100-sports-image-classification', transform=transforms, train=True)
@@ -70,6 +70,13 @@ def get_model(model_config: dict):
         seq_blocks.append(model.classifier)        
     elif model_config['name'] == 'vit_h_14':
         model = models.vit_h_14(weights=models.ViT_H_14_Weights.IMAGENET1K_SWAG_LINEAR_V1)
+        in_features = model.heads.head.in_features
+        classifier = nn.Linear(in_features, SportDataset.NUM_CLASSES)
+        model.heads.head = classifier
+        seq_blocks = list(model.encoder.layers)
+        seq_blocks.append(model.heads)
+    elif model_config['name'] == 'vit_b_16':
+        model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_SWAG_LINEAR_V1)
         in_features = model.heads.head.in_features
         classifier = nn.Linear(in_features, SportDataset.NUM_CLASSES)
         model.heads.head = classifier
@@ -122,10 +129,10 @@ def random_transfer_strategy():
     strategy = {}
     
     strategies_types = ['finetune', 'extractor', 'random', 'unfreeze_last_percent']
-    # strategy['type'] = 'unfreeze_last_percent'
-    strategy['type'] = np.random.choice(strategies_types)
+    strategy['type'] = 'unfreeze_last_percent'
+    # strategy['type'] = np.random.choice(strategies_types)
     if strategy['type'] == 'unfreeze_last_percent':
-        percentage = np.random.rand()
+        percentage = np.random.rand() * 0.1
         strategy['percentage'] = percentage
     elif strategy['type'] == 'random':
         strategy['freeze_prob'] = np.random.rand()
@@ -141,7 +148,7 @@ def random_optimizer():
     }
     # if optimizer['name'] == 'SGD':
     optimizer['kwargs']['lr'] = np.random.choice([0.1, 0.01, 0.001, 0.0001, 1e-5])
-    optimizer['kwargs']['weight_decay'] = np.random.choice([1e-2, 1e-3, 1e-4])
+    optimizer['kwargs']['weight_decay'] = np.random.choice([1e-2, 1e-3, 1e-4, 0.0])
     return optimizer
 
 def generate_random_config(model_name: Optional[str] = None):
@@ -151,7 +158,8 @@ def generate_random_config(model_name: Optional[str] = None):
         model_name = np.random.choice(model_names)
     # strategy
     config = {
-        'batch_size': np.random.choice([128, 256, 512]),
+        # 'batch_size': np.random.choice([128, 256, 512]),
+        'batch_size': np.random.choice([256, 512, 1024]),
         # 'batch_size': np.random.choice([1024, 2048, 4096]),
         'val_batch_size': 128,
         'randomness': {
@@ -159,10 +167,17 @@ def generate_random_config(model_name: Optional[str] = None):
             'model_seed': 42,
             'split_seed': 42
         },
+        "transform": {
+            'random_resize_crop': {
+                'size': (224, 224),
+                'scale': (0.7, 1.0),
+                'ratio': (0.8, 1.2)
+            }
+        },
         'optimizer': random_optimizer(),
         'model': {
             'name': model_name,
-            'transfer_strategy': random_transfer_strategy()
+            'transfer_strategy': random_transfer_strategy(),
         }
     }
     return config
@@ -190,7 +205,7 @@ if __name__ == "__main__":
     # }
     config = {
         "model": {
-            "name": "efficientnet_b2",
+            "name": "vit_b_16",
             "transfer_strategy": {
                 "type": "finetune"
             }
@@ -199,7 +214,7 @@ if __name__ == "__main__":
             "name": "Adam",
             "kwargs": {
                 "lr": 0.001,
-                "weight_decay": 0.0001
+                "weight_decay": 0.000
             }
         },
         "batch_size": 512,
@@ -217,7 +232,7 @@ if __name__ == "__main__":
         },
         "val_batch_size": 128
     }
-    # config = generate_random_config('efficientnet_b2')
+    config = generate_random_config('vit_b_16')
     pprint(config)
     
     # Ensure deterministic behavior
@@ -235,6 +250,10 @@ if __name__ == "__main__":
     # Split into train and val parts
     with temp_seed(config['randomness']['split_seed']):
         train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.9, 0.1])
+        torch.save(train_dataset.indices, 'train_dataset.pt')
+        torch.save(val_dataset.indices, 'val_dataset.pt')
+    torch.save(train_dataset[0][0], 'img.pt')
+    exit()
 
     # Loaders
     if config['model']['name'] == 'alexnet':
@@ -242,7 +261,9 @@ if __name__ == "__main__":
     elif config['model']['name'] == 'efficientnet_b2':
         batch_size = 16
     elif config['model']['name'] == 'vit_h_14':
-        batch_size = 32
+        batch_size = 16
+    elif config['model']['name'] == 'vit_b_16':
+        batch_size = 64
     acc_grad_batches = config['batch_size'] // batch_size
     train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=5, shuffle=True, drop_last=True, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=config['val_batch_size'], num_workers=5, shuffle=False, drop_last=False, pin_memory=True)
@@ -256,22 +277,22 @@ if __name__ == "__main__":
 
     wandb.init(
         entity="bohdanmahometa",
-        project="sports-classification-3",
+        project="sports-classification-4",
         resume='never',
         config=config,
-        name='noble-lake-rrc2',
-        # job_type='effnetb2_horflip'
+        # name='noble-lake-rrc2',
+        job_type='vitb16'
     )
     config = wandb.run.config
     wandb.run.log_code('.')
 
-    val_loss, val_acc = val_step(model, val_loader)
-    print(f"Preliminary val:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
-    wandb.log({
-        'val_loss': val_loss,
-        'val_acc': val_acc,
-        'epoch': 0
-    })
+    # val_loss, val_acc = val_step(model, val_loader)
+    # print(f"Preliminary val:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
+    # wandb.log({
+    #     'val_loss': val_loss,
+    #     'val_acc': val_acc,
+    #     'epoch': 0
+    # })
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, threshold=0.01)
 
