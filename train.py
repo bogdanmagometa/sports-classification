@@ -68,6 +68,7 @@ def get_model(model_config: dict):
         model.classifier[1] = classifier
         seq_blocks = list(model.features)
         seq_blocks.append(model.classifier)        
+        model.load_state_dict(torch.load('./experiments/noble-lake-rrc2/ckpt.ckpt', map_location='cpu'))
     elif model_config['name'] == 'vit_h_14':
         model = models.vit_h_14(weights=models.ViT_H_14_Weights.IMAGENET1K_SWAG_LINEAR_V1)
         in_features = model.heads.head.in_features
@@ -234,7 +235,8 @@ if __name__ == "__main__":
 
     # Split into train and val parts
     with temp_seed(config['randomness']['split_seed']):
-        train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.9, 0.1])
+        # train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.9, 0.1])
+        train_dataset = dataset
 
     # Loaders
     if config['model']['name'] == 'alexnet':
@@ -245,7 +247,7 @@ if __name__ == "__main__":
         batch_size = 32
     acc_grad_batches = config['batch_size'] // batch_size
     train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=5, shuffle=True, drop_last=True, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=config['val_batch_size'], num_workers=5, shuffle=False, drop_last=False, pin_memory=True)
+    # val_loader = DataLoader(val_dataset, batch_size=config['val_batch_size'], num_workers=5, shuffle=False, drop_last=False, pin_memory=True)
 
     # Model
     with temp_seed(config['randomness']['model_seed']):
@@ -256,22 +258,22 @@ if __name__ == "__main__":
 
     wandb.init(
         entity="bohdanmahometa",
-        project="sports-classification-3",
+        project="sports-classification-3-test",
         resume='never',
         config=config,
-        name='noble-lake-rrc2',
-        # job_type='effnetb2_horflip'
+        name='noble-lake-full',
+        job_type='effnetb2_finetune'
     )
     config = wandb.run.config
     wandb.run.log_code('.')
 
-    val_loss, val_acc = val_step(model, val_loader)
-    print(f"Preliminary val:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
-    wandb.log({
-        'val_loss': val_loss,
-        'val_acc': val_acc,
-        'epoch': 0
-    })
+    # val_loss, val_acc = val_step(model, val_loader)
+    # print(f"Preliminary val:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
+    # wandb.log({
+    #     'val_loss': val_loss,
+    #     'val_acc': val_acc,
+    #     'epoch': 0
+    # })
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, threshold=0.01)
 
@@ -318,17 +320,17 @@ if __name__ == "__main__":
         }, commit=False)
 
         # Log val metrics
-        val_loss, val_acc = val_step(model, val_loader)
-        print(f"Val epoch {epoch}:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
-        wandb.log({
-            'val_loss': val_loss,
-            'val_acc': val_acc
-        })
+        # val_loss, val_acc = val_step(model, val_loader)
+        # print(f"Val epoch {epoch}:\t{val_loss:.2f} loss \t {val_acc:.3f} acc\n")
+        # wandb.log({
+        #     'val_loss': val_loss,
+        #     'val_acc': val_acc
+        # })
 
         scheduler.step(val_loss)
         
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        if train_acc > best_val_acc:
+            best_val_acc = train_acc
             output_dir = os.path.join('experiments', wandb.run.name)
             os.makedirs(output_dir, exist_ok=True)
             torch.save(model.state_dict(), os.path.join(output_dir, f'ckpt.ckpt'))
