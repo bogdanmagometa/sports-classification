@@ -232,7 +232,7 @@ if __name__ == "__main__":
         },
         "val_batch_size": 128
     }
-    config = generate_random_config('vit_b_16')
+    # config = generate_random_config('vit_b_16')
     pprint(config)
     
     # Ensure deterministic behavior
@@ -250,10 +250,6 @@ if __name__ == "__main__":
     # Split into train and val parts
     with temp_seed(config['randomness']['split_seed']):
         train_dataset, val_dataset = torch.utils.data.random_split(dataset, [0.9, 0.1])
-        torch.save(train_dataset.indices, 'train_dataset.pt')
-        torch.save(val_dataset.indices, 'val_dataset.pt')
-    torch.save(train_dataset[0][0], 'img.pt')
-    exit()
 
     # Loaders
     if config['model']['name'] == 'alexnet':
@@ -271,6 +267,7 @@ if __name__ == "__main__":
     # Model
     with temp_seed(config['randomness']['model_seed']):
         model = get_model(config['model'])
+    model.load_state_dict(torch.load('/titan/bohdan/sports-classification/experiments/gentle-grass-16/ckpt.ckpt', map_location='cpu'))
     model.cuda();
 
     optimizer = get_optimizer(config['optimizer'])
