@@ -276,6 +276,7 @@ if __name__ == "__main__":
     # })
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=2, threshold=0.01)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 5)
 
     best_val_acc = float('-inf')
 
@@ -327,7 +328,8 @@ if __name__ == "__main__":
         #     'val_acc': val_acc
         # })
 
-        scheduler.step(val_loss)
+        # scheduler.step(val_loss)
+        scheduler.step()
         
         if train_acc > best_val_acc:
             best_val_acc = train_acc
